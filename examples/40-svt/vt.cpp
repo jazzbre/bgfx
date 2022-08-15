@@ -15,8 +15,13 @@
 
 #include <bx/file.h>
 #include <bx/sort.h>
+#include <bx/timer.h>
 
 #include "vt.h"
+
+#include "stb/stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb/stb_image_write.h"
 
 namespace vt
 {
@@ -1091,45 +1096,93 @@ bx::AllocatorI* VirtualTexture::getAllocator()
 	return s_allocator;
 }
 
-TileDataFile::TileDataFile(const bx::FilePath& filename, VirtualTextureInfo* _info, bool _readWrite) : m_info(_info)
+TileDataFile::TileDataFile(const bx::FilePath& filename, VirtualTextureInfo* _info, int pageCount, bool _readWrite) : m_info(_info), m_pageCount(pageCount), m_pageHeaders(nullptr), m_fileOffset(0), m_compressionBuffer(nullptr)
 {
 	const char* access = _readWrite ? "w+b" : "rb";
 	m_file = fopen(filename.getCPtr(), access);
 	m_size = m_info->GetPageSize() * m_info->GetPageSize() * s_channelCount;
+	if(m_pageCount)
+	{
+		m_pageHeaders = (PageHeader*)BX_ALLOC(VirtualTexture::getAllocator(), sizeof(PageHeader) * m_pageCount);
+		memset(m_pageHeaders, 0, sizeof(PageHeader) * m_pageCount);
+		m_compressionBuffer = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), m_size);
+		writeInfo();
+	}	
 }
 
 TileDataFile::~TileDataFile()
 {
+	BX_FREE(VirtualTexture::getAllocator(), m_compressionBuffer);
+	BX_FREE(VirtualTexture::getAllocator(), m_pageHeaders);
 	fclose(m_file);
 }
 
 void TileDataFile::readInfo()
 {
-	fseek(m_file, 0, SEEK_SET);
+	_fseeki64(m_file, 0, SEEK_SET);
 	auto ret = fread(m_info, sizeof(*m_info), 1, m_file);
-	BX_UNUSED(ret);
+	BX_ASSERT(ret);
+	ret = fread(&m_pageCount, sizeof(m_pageCount), 1, m_file);
+	BX_ASSERT(ret);
+	m_pageHeaders = (PageHeader*)BX_ALLOC(VirtualTexture::getAllocator(), sizeof(PageHeader) * m_pageCount);
+	ret = fread(m_pageHeaders, sizeof(PageHeader) * m_pageCount, 1, m_file);
+	BX_ASSERT(ret);
 	m_size = m_info->GetPageSize() * m_info->GetPageSize() * s_channelCount;
+	m_compressionBuffer = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), m_size);
 }
 
 void TileDataFile::writeInfo()
 {
-	fseek(m_file, 0, SEEK_SET);
+	_fseeki64(m_file, 0, SEEK_SET);
 	auto ret = fwrite(m_info, sizeof(*m_info), 1, m_file);
-	BX_UNUSED(ret);
+	BX_ASSERT(ret);
+	ret = fwrite(&m_pageCount, sizeof(m_pageCount), 1, m_file);
+	BX_ASSERT(ret);
+	ret = fwrite(m_pageHeaders, sizeof(PageHeader) * m_pageCount, 1, m_file);
+	BX_ASSERT(ret);
+	m_fileOffset = _ftelli64(m_file);
+}
+
+namespace
+{
+	struct JPGFunctionContext
+	{
+		TileDataFile::PageHeader* pageHeader;
+		uint8_t* compressionBuffer;
+	};
+
+	void WriteJPGFunction(void *_context, void *data, int size)
+	{
+		auto* context = (JPGFunctionContext*)_context;
+		memcpy(context->compressionBuffer + context->pageHeader->m_size, data, size);
+		context->pageHeader->m_size += size;
+	}
 }
 
 void TileDataFile::readPage(int index, uint8_t* data)
 {
-	fseek(m_file, m_size * index + s_tileFileDataOffset, SEEK_SET);
-	auto ret = fread(data, m_size, 1, m_file);
-	BX_UNUSED(ret);
+	const auto& pageHeader = m_pageHeaders[index];
+	_fseeki64(m_file, pageHeader.m_position, SEEK_SET);
+	auto ret = fread(m_compressionBuffer, pageHeader.m_size, 1, m_file);
+	BX_ASSERT(ret);
+	int width, height;
+	int components;
+	auto newData = stbi_load_from_memory(m_compressionBuffer, pageHeader.m_size, &width, &height, &components, 4);
+	memcpy(data, newData, m_size);
+	stbi_image_free(newData);
 }
 
 void TileDataFile::writePage(int index, uint8_t* data)
 {
-	fseek(m_file, m_size * index + s_tileFileDataOffset, SEEK_SET);
-	auto ret = fwrite(data, m_size, 1, m_file);
-	BX_UNUSED(ret);
+	auto& pageHeader = m_pageHeaders[index];
+	_fseeki64(m_file, m_fileOffset, SEEK_SET);
+	const int size = m_info->GetPageSize();
+	JPGFunctionContext context = {&pageHeader, m_compressionBuffer};
+	stbi_write_jpg_to_func(WriteJPGFunction, &context, size, size, 4, data, 90);
+	auto ret = fwrite(m_compressionBuffer, pageHeader.m_size, 1, m_file);
+	BX_ASSERT(ret);
+	pageHeader.m_position = m_fileOffset;
+	m_fileOffset = _ftelli64(m_file);	
 }
 
 // TileGenerator
@@ -1164,13 +1217,128 @@ TileGenerator::~TileGenerator()
 	BX_DELETE(VirtualTexture::getAllocator(), m_tileImage);
 }
 
-bool TileGenerator::generate(const bx::FilePath& _filePath)
+namespace
 {
-	const bx::StringView baseName = _filePath.getBaseName();
+bool ReadDDS(const char* path, int x, int y, SimpleImage& image, int textureSize, int offsetX, int offsetY)
+{
+	const int index = (y * 16 + x) + 1;		
+	char buffer[1024];
+	bx::snprintf(buffer, sizeof(buffer), "%s%d.dds", path, index);
+	bx::FilePath _filePath(buffer);
+	bx::Error err;
+	bx::FileReader fileReader;
+
+	const int texturePitch = textureSize * 4;
+
+	if (!bx::open(&fileReader, _filePath, &err) )
+	{
+		bx::debugPrintf("Image open failed'%s'.\n", _filePath.getCPtr() );
+		for(int _y=0;_y<textureSize;++_y)
+		{
+			memset(&image.m_data[(_y + offsetY) * (image.m_width * 4) + (offsetX * 4)], 0, texturePitch);
+		}
+		return false;
+	}
+
+	int64_t size = bx::getSize(&fileReader);
+
+	if (0 == size)
+	{
+		bx::debugPrintf("Image '%s' size is 0.\n", _filePath.getCPtr() );
+		return false;
+	}
+
+	uint8_t* data = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), size_t(size) );
+
+	bx::read(&fileReader, data, int32_t(size), &err);
+	bx::close(&fileReader);
+
+	if (!err.isOk() )
+	{
+		bx::debugPrintf("Image read failed'%s'.\n", _filePath.getCPtr() );
+		BX_FREE(VirtualTexture::getAllocator(), data);		
+		return false;
+	}
+
+	uint8_t* imageData = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), textureSize * texturePitch);
+	bimg::imageDecodeToBgra8(VirtualTexture::getAllocator(), imageData, data + 128, textureSize, textureSize, texturePitch, bimg::TextureFormat::BC1);
+
+	for(int _y=0;_y<textureSize;++_y)
+	{
+		memcpy(&image.m_data[(_y + offsetY) * (image.m_width * 4) + (offsetX * 4)], imageData + _y * texturePitch, texturePitch);
+	}
+
+	BX_FREE(VirtualTexture::getAllocator(), imageData);
+	BX_FREE(VirtualTexture::getAllocator(), data);
+	return true;
+}
+
+struct InputTiles
+{
+	Point index[3][3] = {{{-1,-1},{-1,-1},{-1,-1}},{{-1,-1},{-1,-1},{-1,-1}},{{-1,-1},{-1,-1},{-1,-1}}};
+};
+
+void LoadInputTiles(const char* path, int inputX, int inputY, InputTiles& inputTiles, SimpleImage& image, int textureSize, int tileSize)
+{
+	for(int _y = inputY-1;_y<=inputY+1;++_y)
+	{
+		if(_y < 0 || _y >= tileSize)
+		{
+			continue;
+		}
+		int localTileY = _y % 3;
+		for(int _x = inputX-1;_x<=inputX+1;++_x)
+		{
+			if(_x < 0 || _x >= tileSize)
+			{
+				continue;
+			}			
+			int localTileX = _x % 3;
+			Point p = {_x, _y};
+			if(inputTiles.index[localTileX][localTileY]==p)
+			{
+				continue;
+			}
+			inputTiles.index[localTileX][localTileY]=p;
+			bx::debugPrintf("Loading %dx%d tile\n", _x, _y);
+			ReadDDS(path, _x, _y, image, textureSize, localTileX * textureSize, localTileY * textureSize);
+		}
+	}
+	if(false)
+	{
+		char buffer[4096];
+		bx::snprintf(buffer, sizeof(buffer), "%stest.png", path);
+		stbi_write_png(buffer, image.m_width,  image.m_height, 4, &image.m_data[0], image.m_width * 4);
+	}
+}
+
+void CopyTileFromInput(int x, int y, const SimpleImage& sourceImage, SimpleImage& destinationImage, int pageSize)
+{
+	// Copy sub-image with border
+	const auto srcPitch = sourceImage.m_width * s_channelCount;
+	const auto src = (const uint8_t*)sourceImage.m_data.begin();
+	const auto dstPitch = destinationImage.m_width * destinationImage.m_channelCount;
+	auto dst = &destinationImage.m_data[0];
+	for (int iy = 0; iy < pageSize; ++iy)
+	{
+		const int ry = (y + iy + sourceImage.m_height) % sourceImage.m_height;
+		for (int ix = 0; ix < pageSize; ++ix)
+		{
+			const int rx = (x + ix + sourceImage.m_width) % sourceImage.m_width;
+			bx::memCopy(&dst[iy * dstPitch + ix * destinationImage.m_channelCount], &src[ry * srcPitch + rx * s_channelCount], destinationImage.m_channelCount);
+		}
+	}
+}
+
+}
+
+bool TileGenerator::generate(const bx::FilePath& _filePath, const char* baseName, const int inputTextureSize, const int inputTileCount)
+{
+	const auto startCounter = bx::getHPCounter();
 
 	// Generate cache filename
 	char tmp[256];
-	bx::snprintf(tmp, sizeof(tmp), "%.*s.vt", baseName.getLength(), baseName.getPtr() );
+	bx::snprintf(tmp, sizeof(tmp), "%s.vt", baseName);
 
 	bx::FilePath cacheFilePath("temp");
 	cacheFilePath.join(tmp);
@@ -1189,76 +1357,69 @@ bool TileGenerator::generate(const bx::FilePath& _filePath)
 		}
 	}
 
-	// Read image
-	{
-		bx::debugPrintf("Reading image '%s'.\n", _filePath.getCPtr() );
-
-		bx::Error err;
-		bx::FileReader fileReader;
-
-		if (!bx::open(&fileReader, _filePath, &err) )
-		{
-			bx::debugPrintf("Image open failed'%s'.\n", _filePath.getCPtr() );
-			return false;
-		}
-
-		int64_t size = bx::getSize(&fileReader);
-
-		if (0 == size)
-		{
-			bx::debugPrintf("Image '%s' size is 0.\n", _filePath.getCPtr() );
-			return false;
-		}
-
-		uint8_t* rawImage = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), size_t(size) );
-
-		bx::read(&fileReader, rawImage, int32_t(size), &err);
-		bx::close(&fileReader);
-
-		if (!err.isOk() )
-		{
-			bx::debugPrintf("Image read failed'%s'.\n", _filePath.getCPtr() );
-			BX_FREE(VirtualTexture::getAllocator(), rawImage);
-			return false;
-		}
-
-		m_sourceImage = bimg::imageParse(VirtualTexture::getAllocator(), rawImage, uint32_t(size), bimg::TextureFormat::BGRA8, &err);
-		BX_FREE(VirtualTexture::getAllocator(), rawImage);
-
-		if (!err.isOk() )
-		{
-			bx::debugPrintf("Image parse failed'%s'.\n", _filePath.getCPtr() );
-			return false;
-		}
-	}
-
 	// Setup
-	m_info->m_virtualTextureSize = int(m_sourceImage->m_width);
+	m_info->m_virtualTextureSize = inputTextureSize * inputTileCount;
 	m_indexer = BX_NEW(VirtualTexture::getAllocator(), PageIndexer)(m_info);
 
+	const auto pageCount = m_indexer->getCount();
+
 	// Open tile data file
-	m_tileDataFile = BX_NEW(VirtualTexture::getAllocator(), TileDataFile)(cacheFilePath, m_info, true);
+	m_tileDataFile = BX_NEW(VirtualTexture::getAllocator(), TileDataFile)(cacheFilePath, m_info, pageCount, true);
 	m_page1Image   = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(m_pagesize, m_pagesize, s_channelCount, 0xff);
 	m_page2Image   = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(m_pagesize, m_pagesize, s_channelCount, 0xff);
 	m_tileImage    = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(m_tilesize, m_tilesize, s_channelCount, 0xff);
 	m_2xtileImage  = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(m_tilesize * 2, m_tilesize * 2, s_channelCount, 0xff);
 	m_4xtileImage  = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(m_tilesize * 4, m_tilesize * 4, s_channelCount, 0xff);
 
-	// Generate tiles
-	bx::debugPrintf("Generating tiles\n");
-	auto mipcount = m_indexer->getMipCount();
+	const int inputTileBufferImageSize = inputTextureSize * 3;
+	SimpleImage inputTileBufferImage(inputTileBufferImageSize, inputTileBufferImageSize, 4);
+	InputTiles inputTiles;
+	const auto mipcount = m_indexer->getMipCount();
+	const auto tilesPerInputTile = inputTextureSize / m_tilesize;
+	bx::debugPrintf("tilesPerInputTile %d\n", tilesPerInputTile);
 	for (int i = 0; i < mipcount; ++i)
 	{
-		int count = (m_info->m_virtualTextureSize / m_tilesize) >> i;
+		const int count = (m_info->m_virtualTextureSize / m_tilesize) >> i;
 		bx::debugPrintf("Generating Mip:%d Count:%dx%d\n", i, count, count);
-		for (int y = 0; y < count; ++y)
-		{
-			for (int x = 0; x < count; ++x)
+		if(i==0)
+		{			
+			for (int ty = 0; ty < count; ty += tilesPerInputTile)
 			{
-				Page page = { x, y, i };
-				int index = m_indexer->getIndexFromPage(page);
-				CopyTile(*m_page1Image, page);
-				m_tileDataFile->writePage(index, &m_page1Image->m_data[0]);
+				const int realY = ty * m_tilesize;
+				const int tileY = realY / inputTextureSize;
+				for (int tx = 0; tx < count; tx += tilesPerInputTile)
+				{
+					const int realX = tx * m_tilesize;
+					const int tileX = realX / inputTextureSize;
+					LoadInputTiles(_filePath.getCPtr(), tileX, tileY, inputTiles, inputTileBufferImage, inputTextureSize, inputTileCount);
+					for (int y = 0; y < tilesPerInputTile; ++y)
+					{
+						for (int x = 0; x < tilesPerInputTile; ++x)
+						{
+							const Page page = { tx + x, ty + y, i };
+							const int index = m_indexer->getIndexFromPage(page);
+							const int offsetX = page.m_x * m_tilesize - m_info->m_borderSize;
+							const int offsetY = page.m_y * m_tilesize - m_info->m_borderSize;
+							CopyTileFromInput(offsetX, offsetY, inputTileBufferImage, *m_page1Image, m_pagesize);
+							m_tileDataFile->writePage(index, &m_page1Image->m_data[0]);
+
+						}
+					}
+				}
+			}
+		}
+		else
+		{
+			for (int y = 0; y < count; ++y)
+			{
+				for (int x = 0; x < count; ++x)
+				{
+					const Page page = { x, y, i };
+					const int index = m_indexer->getIndexFromPage(page);
+					CopyTile(*m_page1Image, page);
+					m_tileDataFile->writePage(index, &m_page1Image->m_data[0]);
+
+				}
 			}
 		}
 	}
@@ -1270,6 +1431,11 @@ bool TileGenerator::generate(const bx::FilePath& _filePath)
 	BX_DELETE(VirtualTexture::getAllocator(), m_tileDataFile);
 	m_tileDataFile = nullptr;
 	bx::debugPrintf("Done!\n");
+
+	const auto endCounter = bx::getHPCounter();
+	const auto time = (double)(endCounter - startCounter) / (double)bx::getHPFrequency();
+	bx::debugPrintf("Build took %fs (%fmin)\n", time, time / 60.0);
+
 	return true;
 }
 

@@ -44,7 +44,7 @@ struct PosTexcoordVertex
 
 bgfx::VertexLayout PosTexcoordVertex::ms_layout;
 
-static const float s_planeScale = 50.0f;
+static const float s_planeScale = 256.0f;
 
 static PosTexcoordVertex s_vplaneVertices[] =
 {
@@ -145,11 +145,11 @@ public:
 		// Generate tile data file (if not yet created)
 		{
 			vt::TileGenerator tileGenerator(m_vti);
-			tileGenerator.generate("textures/8k_mars.jpg");
+			tileGenerator.generate("d:/FalconBMS/Falcon BMS 4.37 (Internal)/Data/TerrData/Korea/NewTerrain/Photoreal/4K/", "base4k", 4096, 4);
 		}
 
 		// Load tile data file
-		auto tileDataFile = new vt::TileDataFile("temp/8k_mars.vt", m_vti);
+		auto tileDataFile = new vt::TileDataFile("temp/base4k.vt", m_vti);
 		tileDataFile->readInfo();
 
 		// Create virtual texture and feedback buffer
@@ -266,7 +266,7 @@ public:
 				cameraGetViewMtx(view);
 
 				float proj[16];
-				bx::mtxProj(proj, 60.0f, float(m_width) / float(m_height), 0.1f, 1000.0f, m_caps->homogeneousDepth);
+				bx::mtxProj(proj, 90.0f, float(m_width) / float(m_height), 0.1f, 100000.0f, m_caps->homogeneousDepth);
 
 				// Setup views
 				for (uint16_t i = 0; i < 2; ++i)

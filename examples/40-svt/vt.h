@@ -38,6 +38,11 @@ class TileDataFile;
 struct Point
 {
 	int m_x, m_y;
+
+	bool operator==(const Point& other) const
+	{
+		return m_x == other.m_x && m_y == other.m_y;
+	}
 };
 
 // Rect
@@ -396,7 +401,15 @@ private:
 class TileDataFile
 {
 public:
-	TileDataFile(const bx::FilePath& filename, VirtualTextureInfo* _info, bool _readWrite = false);
+	struct PageHeader
+	{
+		int64_t m_position;
+		uint32_t m_size;
+		uint32_t m_padding;
+	};
+
+public:
+	TileDataFile(const bx::FilePath& filename, VirtualTextureInfo* _info, int pageCount = 0, bool _readWrite = false);
 	~TileDataFile();
 
 	void readInfo();
@@ -408,7 +421,11 @@ public:
 private:
 	VirtualTextureInfo*	m_info;
 	int					m_size;
+	int				    m_pageCount;
 	FILE*				m_file;
+	PageHeader*			m_pageHeaders;
+	uint64_t			m_fileOffset;
+	uint8_t*			m_compressionBuffer;
 };
 
 // TileGenerator
@@ -418,7 +435,7 @@ public:
 	TileGenerator(VirtualTextureInfo* _info);
 	~TileGenerator();
 
-	bool generate(const bx::FilePath& filename);
+	bool generate(const bx::FilePath& filename, const char* baseName, const int inputTextureSize, const int inputTileCount);
 
 private:
 	void CopyTile(SimpleImage& image, Page request);
