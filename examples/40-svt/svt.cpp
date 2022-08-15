@@ -139,17 +139,19 @@ public:
 		// Create Virtual texture info
 		m_vti = new vt::VirtualTextureInfo();
 		m_vti->m_virtualTextureSize = 8192; // The actual size will be read from the tile data file
-		m_vti->m_tileSize = 128;
+		m_vti->m_tileSize = 256;
 		m_vti->m_borderSize = 1;
 
 		// Generate tile data file (if not yet created)
 		{
 			vt::TileGenerator tileGenerator(m_vti);
-			tileGenerator.generate("d:/FalconBMS/Falcon BMS 4.37 (Internal)/Data/TerrData/Korea/NewTerrain/Photoreal/4K/", "base4k", 4096, 4);
+			//tileGenerator.generate("d:/FalconBMS/Falcon BMS 4.37 (Internal)/Data/TerrData/Korea/NewTerrain/Photoreal/4K/", "base4k", 4096, 16);
+			tileGenerator.generate("d:/FalconBMS/Falcon BMS 4.37 (Internal)/Data/TerrData/Korea/NewTerrain/Photoreal/16K/", "base16k", 16 * 1024, 16);
 		}
 
 		// Load tile data file
-		auto tileDataFile = new vt::TileDataFile("temp/base4k.vt", m_vti);
+		//auto tileDataFile = new vt::TileDataFile("temp/base4k.vt", m_vti);
+		auto tileDataFile = new vt::TileDataFile("temp/base16k.vt", m_vti);
 		tileDataFile->readInfo();
 
 		// Create virtual texture and feedback buffer
