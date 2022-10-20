@@ -498,6 +498,7 @@ void PageTable::update(bgfx::ViewId blitViewId)
 		auto stagingTexture = m_stagingTextures[i];
 		auto size = uint16_t(m_info->GetPageTableSize() >> i);
 		bgfx::updateTexture2D(stagingTexture, 0, 0, 0, 0, size, size, bgfx::copy(&m_images[i]->m_data[0], size * size * s_channelCount));
+		bx::debugPrintf("Updating %p %d %d page table\n", this, size, i);
 		bgfx::blit(blitViewId, m_texture, uint8_t(i), 0, 0, 0, stagingTexture, 0, 0, 0, 0, size, size);
 	}
 }
@@ -758,6 +759,8 @@ void TextureAtlas::uploadPage(Point pt, uint8_t* data, bgfx::ViewId blitViewId)
 	auto xpos = uint16_t(pt.m_x * pagesize);
 	auto ypos = uint16_t(pt.m_y * pagesize);
 	bgfx::blit(blitViewId, m_texture, 0, xpos, ypos, 0, writer, 0, 0, 0, 0, pagesize, pagesize);
+
+	bx::debugPrintf("Upload page %dx%d\n", pt.m_x, pt.m_y);
 }
 
 bgfx::TextureHandle TextureAtlas::getTexture()

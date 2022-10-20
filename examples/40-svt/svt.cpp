@@ -13,6 +13,7 @@
   *   http://web.archive.org/web/20190103162730/http://www.celestiamotherlode.net/catalog/mars.php
   */
 
+#include <bx/file.h>
 #include "common.h"
 #include "bgfx_utils.h"
 #include "imgui/imgui.h"
@@ -103,6 +104,62 @@ public:
 		// Create vertex stream declaration.
 		PosTexcoordVertex::init();
 
+		{
+			const float size = 1024.0f;
+			const int tesselation = 512;
+			const float ooTesselation = 1.0f / (float)tesselation;
+
+			const auto vertexCount = (tesselation + 1) * (tesselation + 1);
+			const auto vertexSize = vertexCount * sizeof(PosTexcoordVertex);
+			PosTexcoordVertex* vertices = (PosTexcoordVertex*)BX_ALLOC(&m_vtAllocator, vertexSize);
+			const auto indexCount = (tesselation * tesselation) * 6;
+			const auto indexSize = indexCount * sizeof(uint32_t); 
+			uint32_t* indices = (uint32_t*)BX_ALLOC(&m_vtAllocator, indexSize);
+
+			auto indexIndex = 0;
+			auto vertexIndex = 0;
+			auto currentVertex = vertices;
+			auto currentIndex = indices;
+			for(int y=0;y<=tesselation;++y)
+			{
+				const float v = (float)y * ooTesselation;
+				const float yPosition = v * size;
+				for(int x=0;x<=tesselation;++x, ++currentVertex, ++vertexIndex)
+				{
+					const float u = (float)x * ooTesselation;
+					const float xPosition = u * size;
+					currentVertex->m_x = xPosition;
+					currentVertex->m_y = 0.0f;
+					currentVertex->m_z = yPosition;
+					currentVertex->m_u = 1.0 - u;
+					currentVertex->m_v = v;
+
+					if(x<tesselation && y<tesselation)
+					{
+						currentIndex[2] = vertexIndex;
+						currentIndex[1] = vertexIndex + 1;
+						currentIndex[0] = vertexIndex + tesselation + 1;
+
+						currentIndex[3] = vertexIndex + tesselation + 1;
+						currentIndex[4] = vertexIndex + 1;
+						currentIndex[5] = vertexIndex + tesselation + 2;
+
+						currentIndex += 6;
+						indexIndex += 6;
+
+					}
+				}
+			}
+
+			BX_ASSERT(vertexCount == vertexIndex, "Vertex count fail!");
+			BX_ASSERT(indexCount == indexIndex, "Index count fail!");
+			// Create static vertex buffer.
+			m_vbh = bgfx::createVertexBuffer(bgfx::makeRef(vertices, vertexSize), PosTexcoordVertex::ms_layout);
+			m_ibh = bgfx::createIndexBuffer(bgfx::makeRef(indices, indexSize), BGFX_BUFFER_INDEX32);
+		}
+
+
+		/*
 		// Create static vertex buffer.
 		m_vbh = bgfx::createVertexBuffer(
 			  bgfx::makeRef(s_vplaneVertices, sizeof(s_vplaneVertices))
@@ -112,6 +169,7 @@ public:
 		m_ibh = bgfx::createIndexBuffer(
 			  bgfx::makeRef(s_planeIndices, sizeof(s_planeIndices))
 		);
+		*/
 
 		// Create program from shaders.
 		m_vt_unlit = loadProgram("vs_vt_generic", "fs_vt_unlit");
@@ -140,7 +198,7 @@ public:
 		m_vti = new vt::VirtualTextureInfo();
 		m_vti->m_virtualTextureSize = 8192; // The actual size will be read from the tile data file
 		m_vti->m_tileSize = 256;
-		m_vti->m_borderSize = 1;
+		m_vti->m_borderSize = 1;		
 
 		// Generate tile data file (if not yet created)
 		{
@@ -149,14 +207,52 @@ public:
 			tileGenerator.generate("d:/FalconBMS/Falcon BMS 4.37 (Internal)/Data/TerrData/Korea/NewTerrain/Photoreal/16K/", "base16k", 16 * 1024, 16);
 		}
 
+		// Load heightmap
+		{
+
+			bx::Error err;
+			bx::FileReader fileReader;
+
+			if (!bx::open(&fileReader, "d:/FalconBMS/Falcon BMS 4.37 (Internal)/Data/TerrData/Korea/NewTerrain/HeightMaps/HeightMap.raw", &err) )
+			{
+				return;
+			}
+
+			const auto size = bx::getSize(&fileReader);
+			auto data = (int16_t*)BX_ALLOC(&m_vtAllocator, size);
+			bx::read(&fileReader, data, size, &err);
+			bx::close(&fileReader);
+
+
+			const int sourceSize = 32 * 1024;
+			const int targetSize = 16 * 1024;
+			const int targetData16 = targetSize * targetSize * sizeof(float);
+			auto data16 = (float*)BX_ALLOC(&m_vtAllocator, targetData16);
+
+			for(int y=0;y<sourceSize;y+=2)
+			{
+				for(int x=0;x<sourceSize;x+=2)
+				{
+					data16[(y >> 1) * targetSize + (x >> 1)] = (float)data[y * sourceSize + x] * 0.0001f;
+				}
+			}
+
+			m_heightMap = bgfx::createTexture2D(16 * 1024, 16 * 1024, false, 1, bgfx::TextureFormat::R32F, 0, bgfx::copy(data16, targetData16));
+
+			m_tex2 = bgfx::createUniform("s_tex2", bgfx::UniformType::Sampler);
+		}
+
 		// Load tile data file
 		//auto tileDataFile = new vt::TileDataFile("temp/base4k.vt", m_vti);
 		auto tileDataFile = new vt::TileDataFile("temp/base16k.vt", m_vti);
 		tileDataFile->readInfo();
 
 		// Create virtual texture and feedback buffer
-		m_vt = new vt::VirtualTexture(tileDataFile, m_vti, 2048, 1);
+		m_vt = new vt::VirtualTexture(tileDataFile, m_vti, 4096, 1, 6);
 		m_feedbackBuffer = new vt::FeedbackBuffer(m_vti, 64, 64);
+
+		//bgfx::TextureInfo info;
+		//bgfx::TextureFormat::ATC
 
 	}
 
@@ -313,6 +409,7 @@ public:
 
 					// Set virtual texture uniforms
 					m_vt->setUniforms();
+					bgfx::setTexture(4, m_tex2, m_heightMap);
 
 					// Submit primitive for rendering to first pass (to feedback buffer, where mip levels and tile x/y will be rendered
 					if (i == 0)
@@ -347,11 +444,15 @@ public:
 		return false;
 	}
 
+	bgfx::TextureHandle m_heightMap;
+
 	bgfx::VertexBufferHandle m_vbh;
 	bgfx::IndexBufferHandle m_ibh;
 
 	bgfx::ProgramHandle m_vt_unlit;
 	bgfx::ProgramHandle m_vt_mip;
+
+	bgfx::UniformHandle m_tex2;
 
 	uint32_t m_width;
 	uint32_t m_height;
@@ -369,6 +470,7 @@ public:
 	vt::VirtualTextureInfo* m_vti;
 	vt::VirtualTexture* m_vt;
 	vt::FeedbackBuffer* m_feedbackBuffer;
+	
 };
 
 } // namespace
