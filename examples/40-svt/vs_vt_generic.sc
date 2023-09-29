@@ -8,9 +8,15 @@ $output v_texcoord0
 
 #include "../common/common.sh"
 
+SAMPLER2D(s_tex2,  4);
+
 void main()
 {
-   vec3 wpos = mul(u_model[0], vec4(a_position, 1.0) ).xyz;
+   vec3 pos = a_position;
+   vec2 cc = cos(a_texcoord0 * 10.0) * 10.0;
+   //pos.y += cc.x + cc.y;//cos( texture2DLod(s_tex2, a_texcoord0, 0.0);
+   pos.y += texture2DLod(s_tex2, a_texcoord0, 0.0) * 10.0;
+   vec3 wpos = mul(u_model[0], vec4(pos, 1.0) ).xyz;
    gl_Position = mul(u_viewProj, vec4(wpos, 1.0) );
    v_texcoord0 = a_texcoord0;
 }

@@ -14,8 +14,13 @@ $input v_texcoord0
 #include "../common/common.sh"
 #include "virtualtexture.sh"
 
+SAMPLER2D(s_tex2,  4);
+
 void main()
 {
-   gl_FragColor = VirtualTexture(v_texcoord0.xy);
+   vec4 color = pow(VirtualTexture(v_texcoord0.xy), 1.0 / 1.5);
+   vec4 height = texture2D(s_tex2, v_texcoord0.xy);
+   color = mix(color, vec4(33.0 / 255.0, 64.0 / 255.0, 86.0 / 255.0, 1.0), smoothstep(0.001, -0.00001, height.x));
+   gl_FragColor = color;
 }
 
