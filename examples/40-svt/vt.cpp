@@ -19,6 +19,7 @@
 
 #include "vt.h"
 
+#define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
@@ -305,14 +306,14 @@ Quadtree::~Quadtree()
 	{
 		if (m_children[i] != nullptr)
 		{
-			BX_DELETE(VirtualTexture::getAllocator(), m_children[i]);
+			bx::deleteObject(VirtualTexture::getAllocator(), m_children[i]);
 		}
 	}
 }
 
 void Quadtree::add(Page request, Point mapping)
 {
-	int64_t scale = 1 << request.m_mip; // Same as pow( 2, mip )
+	int64_t scale = (int64_t)1 << request.m_mip; // Same as pow( 2, mip )
 	int64_t x = request.m_x * scale;
 	int64_t y = request.m_y * scale;
 
@@ -353,7 +354,7 @@ void Quadtree::remove(Page request)
 
 	if (node != nullptr)
 	{
-		BX_DELETE(VirtualTexture::getAllocator(), node->m_children[index]);
+		bx::deleteObject(VirtualTexture::getAllocator(), node->m_children[index]);
 		node->m_children[index] = nullptr;
 	}
 }
@@ -406,7 +407,7 @@ void Quadtree::write(Quadtree* node, SimpleImage& image, int64_t miplevel)
 
 Quadtree* Quadtree::findPage(Quadtree* node, Page request, int64_t* index)
 {
-	int64_t scale = 1 << request.m_mip; // Same as pow( 2, mip )
+	int64_t scale = (int64_t)1 << request.m_mip; // Same as pow( 2, mip )
 	int64_t x = request.m_x * scale;
 	int64_t y = request.m_y * scale;
 
@@ -468,12 +469,12 @@ PageTable::PageTable(PageCache* _cache, VirtualTextureInfo* _info, PageIndexer* 
 
 PageTable::~PageTable()
 {
-	BX_DELETE(VirtualTexture::getAllocator(), m_quadtree);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_quadtree);
 	bgfx::destroy(m_texture);
 
 	for (int64_t i = 0; i < (int64_t)m_images.size(); ++i)
 	{
-		BX_DELETE(VirtualTexture::getAllocator(), m_images[i]);
+		bx::deleteObject(VirtualTexture::getAllocator(), m_images[i]);
 	}
 
 	for (int64_t i = 0; i < (int64_t)m_stagingTextures.size(); ++i)
@@ -797,7 +798,7 @@ FeedbackBuffer::FeedbackBuffer(VirtualTextureInfo* _info, int64_t _width, int64_
 
 FeedbackBuffer::~FeedbackBuffer()
 {
-	BX_DELETE(VirtualTexture::getAllocator(), m_indexer);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_indexer);
 	bgfx::destroy(m_feedbackFrameBuffer);
 }
 
@@ -889,7 +890,7 @@ int64_t FeedbackBuffer::getHeight() const
 }
 
 // VirtualTexture
-VirtualTexture::VirtualTexture(TileDataFile* _tileDataFile, VirtualTextureInfo* _info, int64_t _atlassize, int64_t _uploadsperframe, int64_t _mipBias)
+VirtualTexture::VirtualTexture(TileDataFile* _tileDataFile, VirtualTextureInfo* _info, int64_t _atlassize, int _uploadsperframe, int64_t _mipBias)
 	: m_tileDataFile(_tileDataFile)
 	, m_info(_info)
 	, m_uploadsPerFrame(_uploadsperframe)
@@ -918,11 +919,11 @@ VirtualTexture::VirtualTexture(TileDataFile* _tileDataFile, VirtualTextureInfo* 
 VirtualTexture::~VirtualTexture()
 {
 	// Destroy
-	BX_DELETE(VirtualTexture::getAllocator(), m_indexer);
-	BX_DELETE(VirtualTexture::getAllocator(), m_atlas);
-	BX_DELETE(VirtualTexture::getAllocator(), m_loader);
-	BX_DELETE(VirtualTexture::getAllocator(), m_cache);
-	BX_DELETE(VirtualTexture::getAllocator(), m_pageTable);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_indexer);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_atlas);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_loader);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_cache);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_pageTable);
 	// Destroy all uniforms and textures
 	bgfx::destroy(u_vt_settings_1);
 	bgfx::destroy(u_vt_settings_2);
@@ -1072,7 +1073,7 @@ void VirtualTexture::update(const tinystl::vector<int64_t>& requests, bgfx::View
 			, [](const void* _a, const void* _b) -> int32_t {
 			const vt::PageCount& lhs = *(const vt::PageCount*)(_a);
 			const vt::PageCount& rhs = *(const vt::PageCount*)(_b);
-			return lhs.compareTo(rhs);
+			return (int32_t)lhs.compareTo(rhs);
 		});
 
 		// if more pages than will fit in memory or more than update per frame drop high res pages with lowest use count
@@ -1110,17 +1111,17 @@ TileDataFile::TileDataFile(const bx::FilePath& filename, VirtualTextureInfo* _in
 	m_size = m_info->GetPageSize() * m_info->GetPageSize() * s_channelCount;
 	if(m_pageCount)
 	{
-		m_pageHeaders = (PageHeader*)BX_ALLOC(VirtualTexture::getAllocator(), sizeof(PageHeader) * m_pageCount);
+		m_pageHeaders = (PageHeader*)bx::alloc(VirtualTexture::getAllocator(), sizeof(PageHeader) * m_pageCount);
 		memset(m_pageHeaders, 0, sizeof(PageHeader) * m_pageCount);		
 		writeInfo();
-		m_compressionBuffer = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), m_size);
+		m_compressionBuffer = (uint8_t*)bx::alloc(VirtualTexture::getAllocator(), m_size);
 	}	
 }
 
 TileDataFile::~TileDataFile()
 {
-	BX_FREE(VirtualTexture::getAllocator(), m_compressionBuffer);
-	BX_FREE(VirtualTexture::getAllocator(), m_pageHeaders);
+	bx::free(VirtualTexture::getAllocator(), m_compressionBuffer);
+	bx::free(VirtualTexture::getAllocator(), m_pageHeaders);
 	fclose(m_file);
 }
 
@@ -1128,25 +1129,25 @@ void TileDataFile::readInfo()
 {
 	_fseeki64(m_file, 0, SEEK_SET);
 	auto ret = fread(m_info, sizeof(*m_info), 1, m_file);
-	BX_ASSERT(ret);
+	BX_ASSERT(ret, "Read failed!");
 	ret = fread(&m_pageCount, sizeof(m_pageCount), 1, m_file);
-	BX_ASSERT(ret);
-	m_pageHeaders = (PageHeader*)BX_ALLOC(VirtualTexture::getAllocator(), sizeof(PageHeader) * m_pageCount);
+	BX_ASSERT(ret, "Read failed!");
+	m_pageHeaders = (PageHeader*)bx::alloc(VirtualTexture::getAllocator(), sizeof(PageHeader) * m_pageCount);
 	ret = fread(m_pageHeaders, sizeof(PageHeader) * m_pageCount, 1, m_file);
-	BX_ASSERT(ret);
+	BX_ASSERT(ret, "Read failed!");
 	m_size = m_info->GetPageSize() * m_info->GetPageSize() * s_channelCount;
-	m_compressionBuffer = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), m_size);
+	m_compressionBuffer = (uint8_t*)bx::alloc(VirtualTexture::getAllocator(), m_size);
 }
 
 void TileDataFile::writeInfo()
 {
 	_fseeki64(m_file, 0, SEEK_SET);
 	auto ret = fwrite(m_info, sizeof(*m_info), 1, m_file);
-	BX_ASSERT(ret);
+	BX_ASSERT(ret, "Write failed!");
 	ret = fwrite(&m_pageCount, sizeof(m_pageCount), 1, m_file);
-	BX_ASSERT(ret);
+	BX_ASSERT(ret, "Write failed!");
 	ret = fwrite(m_pageHeaders, sizeof(PageHeader) * m_pageCount, 1, m_file);
-	BX_ASSERT(ret);
+	BX_ASSERT(ret, "Write failed!");
 	m_fileOffset = _ftelli64(m_file);
 }
 
@@ -1177,8 +1178,8 @@ void TileDataFile::readPage(int64_t index, uint8_t* data, uint8_t* compressionBu
 	_fseeki64(m_file, pageHeader.m_position, SEEK_SET);
 	auto ret = fread(compressionBuffer, pageHeader.m_size, 1, m_file);
 	m_ioMutex.unlock();
-
-	BX_ASSERT(ret);
+	BX_UNUSED(ret);
+	BX_ASSERT(ret, "Read failed!");
 	int width, height;
 	int components;
 	auto newData = stbi_load_from_memory(compressionBuffer, pageHeader.m_size, &width, &height, &components, 4);
@@ -1193,14 +1194,15 @@ void TileDataFile::writePage(int64_t index, uint8_t* data, uint8_t* compressionB
 		compressionBuffer = m_compressionBuffer;
 	}
 	auto& pageHeader = m_pageHeaders[index];
-	const int64_t size = m_info->GetPageSize();
+	const int size = (int)m_info->GetPageSize();
 	JPGFunctionContext context = {&pageHeader, compressionBuffer};
 	stbi_write_jpg_to_func(WriteJPGFunction, &context, size, size, 4, data, 90);
 	
 	m_ioMutex.lock();
 	_fseeki64(m_file, m_fileOffset, SEEK_SET);
 	auto ret = fwrite(compressionBuffer, pageHeader.m_size, 1, m_file);
-	BX_ASSERT(ret);
+	BX_UNUSED(ret);
+	BX_ASSERT(ret, "Write failed!");
 	pageHeader.m_position = m_fileOffset;
 	m_fileOffset = _ftelli64(m_file);
 	m_ioMutex.unlock();
@@ -1229,13 +1231,13 @@ TileGenerator::~TileGenerator()
 		bimg::imageFree(m_sourceImage);
 	}
 
-	BX_DELETE(VirtualTexture::getAllocator(), m_indexer);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_indexer);
 
-	BX_DELETE(VirtualTexture::getAllocator(), m_page1Image);
-	BX_DELETE(VirtualTexture::getAllocator(), m_page2Image);
-	BX_DELETE(VirtualTexture::getAllocator(), m_2xtileImage);
-	BX_DELETE(VirtualTexture::getAllocator(), m_4xtileImage);
-	BX_DELETE(VirtualTexture::getAllocator(), m_tileImage);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_page1Image);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_page2Image);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_2xtileImage);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_4xtileImage);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_tileImage);
 }
 
 namespace
@@ -1269,7 +1271,7 @@ bool ReadDDS(const char* path, int64_t x, int64_t y, SimpleImage& image, int64_t
 		return false;
 	}
 
-	uint8_t* data = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), size_t(size) );
+	uint8_t* data = (uint8_t*)bx::alloc(VirtualTexture::getAllocator(), size_t(size) );
 
 	bx::read(&fileReader, data, int32_t(size), &err);
 	bx::close(&fileReader);
@@ -1277,20 +1279,20 @@ bool ReadDDS(const char* path, int64_t x, int64_t y, SimpleImage& image, int64_t
 	if (!err.isOk() )
 	{
 		bx::debugPrintf("Image read failed'%s'.\n", _filePath.getCPtr() );
-		BX_FREE(VirtualTexture::getAllocator(), data);		
+		bx::free(VirtualTexture::getAllocator(), data);		
 		return false;
 	}
 
-	uint8_t* imageData = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), textureSize * texturePitch);
-	bimg::imageDecodeToBgra8(VirtualTexture::getAllocator(), imageData, data + 128, textureSize, textureSize, texturePitch, bimg::TextureFormat::BC1);
+	uint8_t* imageData = (uint8_t*)bx::alloc(VirtualTexture::getAllocator(), textureSize * texturePitch);
+	bimg::imageDecodeToBgra8(VirtualTexture::getAllocator(), imageData, data + 128, (uint32_t)textureSize, (uint32_t)textureSize, (uint32_t)texturePitch, bimg::TextureFormat::BC1);
 
 	for(int64_t _y=0;_y<textureSize;++_y)
 	{
 		memcpy(&image.m_data[(_y + offsetY) * (image.m_width * 4) + (offsetX * 4)], imageData + _y * texturePitch, texturePitch);
 	}
 
-	BX_FREE(VirtualTexture::getAllocator(), imageData);
-	BX_FREE(VirtualTexture::getAllocator(), data);
+	bx::free(VirtualTexture::getAllocator(), imageData);
+	bx::free(VirtualTexture::getAllocator(), data);
 	return true;
 }
 
@@ -1329,7 +1331,7 @@ void LoadInputTiles(const char* path, int64_t inputX, int64_t inputY, InputTiles
 	{
 		char buffer[4096];
 		bx::snprintf(buffer, sizeof(buffer), "%stest.png", path);
-		stbi_write_png(buffer, image.m_width,  image.m_height, 4, &image.m_data[0], image.m_width * 4);
+		stbi_write_png(buffer, (int)image.m_width,  (int)image.m_height, 4, &image.m_data[0], (int)(image.m_width * 4));
 	}
 }
 
@@ -1373,9 +1375,12 @@ namespace HiResJob
 
 	void JobFunction(uint32_t start_, uint32_t end_, uint32_t threadnum_, void* pArgs_)
 	{
+		BX_UNUSED(start_);
+		BX_UNUSED(end_);
+		BX_UNUSED(threadnum_);
 		Data* data = (Data*)pArgs_;
 		auto page1Image   = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(data->m_pagesize, data->m_pagesize, 4, 0xff);
-		auto compressionBuffer = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), data->m_size);
+		auto compressionBuffer = (uint8_t*)bx::alloc(VirtualTexture::getAllocator(), data->m_size);
 		while(true)
 		{
 			const auto index = data->m_index++;
@@ -1392,8 +1397,8 @@ namespace HiResJob
 			CopyTileFromInput(offsetX, offsetY, *data->m_inputTileBufferImage, *page1Image, data->m_pagesize);
 			data->m_tileDataFile->writePage(pageIndex, &page1Image->m_data[0], compressionBuffer);
 		}
-		BX_FREE(VirtualTexture::getAllocator(), compressionBuffer);
-		BX_FREE(VirtualTexture::getAllocator(), page1Image);
+		bx::free(VirtualTexture::getAllocator(), compressionBuffer);
+		bx::free(VirtualTexture::getAllocator(), page1Image);
 	}	
 }
 
@@ -1417,13 +1422,16 @@ namespace MipMapJob
 
 	void JobFunction(uint32_t start_, uint32_t end_, uint32_t threadnum_, void* pArgs_)
 	{
+		BX_UNUSED(start_);
+		BX_UNUSED(end_);
+		BX_UNUSED(threadnum_);
 		Data* data = (Data*)pArgs_;
 		auto page1Image   = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(data->m_pagesize, data->m_pagesize, 4, 0xff);
 		auto page2Image   = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(data->m_pagesize, data->m_pagesize, 4, 0xff);
 		auto tileImage    = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(data->m_tilesize,data->m_tilesize, 4, 0xff);
 		auto tile2xImage  = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(data->m_tilesize * 2, data->m_tilesize * 2, 4, 0xff);
 		auto tile4xImage  = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(data->m_tilesize * 4, data->m_tilesize * 4, 4, 0xff);
-		auto compressionBuffer = (uint8_t*)BX_ALLOC(VirtualTexture::getAllocator(), data->m_size);
+		auto compressionBuffer = (uint8_t*)bx::alloc(VirtualTexture::getAllocator(), data->m_size);
 		while(true)
 		{
 			const auto index = data->m_index++;
@@ -1438,12 +1446,12 @@ namespace MipMapJob
 			data->m_tileGenerator->copyTile(*page1Image, page, page2Image, tile2xImage, tile4xImage, compressionBuffer);
 			data->m_tileDataFile->writePage(pageIndex, &page1Image->m_data[0], compressionBuffer);
 		}
-		BX_FREE(VirtualTexture::getAllocator(), compressionBuffer);
-		BX_FREE(VirtualTexture::getAllocator(), page1Image);
-		BX_FREE(VirtualTexture::getAllocator(), page2Image);
-		BX_FREE(VirtualTexture::getAllocator(), tileImage);
-		BX_FREE(VirtualTexture::getAllocator(), tile4xImage);
-		BX_FREE(VirtualTexture::getAllocator(), tile2xImage);
+		bx::free(VirtualTexture::getAllocator(), compressionBuffer);
+		bx::free(VirtualTexture::getAllocator(), page1Image);
+		bx::free(VirtualTexture::getAllocator(), page2Image);
+		bx::free(VirtualTexture::getAllocator(), tileImage);
+		bx::free(VirtualTexture::getAllocator(), tile4xImage);
+		bx::free(VirtualTexture::getAllocator(), tile2xImage);
 	}	
 }
 
@@ -1532,7 +1540,7 @@ bool TileGenerator::generate(const bx::FilePath& _filePath, const char* baseName
 						data.m_info = m_info;
 						data.m_inputTileBufferImage = &inputTileBufferImage;
 						data.m_tileDataFile = m_tileDataFile;						
-						enkiAddTaskSetArgs(taskScheduler, hiResTaskSet, &data, data.m_tileCount);
+						enkiAddTaskSetArgs(taskScheduler, hiResTaskSet, &data, (uint32_t)data.m_tileCount);
 						enkiWaitForTaskSet(taskScheduler, hiResTaskSet);
 					}
 					else
@@ -1570,7 +1578,7 @@ bool TileGenerator::generate(const bx::FilePath& _filePath, const char* baseName
 				data.m_inputTileBufferImage = &inputTileBufferImage;
 				data.m_tileDataFile = m_tileDataFile;
 				data.m_tileGenerator = this;
-				enkiAddTaskSetArgs(taskScheduler, mipMapTaskSet, &data, data.m_tileCount);
+				enkiAddTaskSetArgs(taskScheduler, mipMapTaskSet, &data, (uint32_t)data.m_tileCount);
 				enkiWaitForTaskSet(taskScheduler, mipMapTaskSet);
 			}
 			else
@@ -1593,7 +1601,7 @@ bool TileGenerator::generate(const bx::FilePath& _filePath, const char* baseName
 	// Write header
 	m_tileDataFile->writeInfo();
 	// Close tile file
-	BX_DELETE(VirtualTexture::getAllocator(), m_tileDataFile);
+	bx::deleteObject(VirtualTexture::getAllocator(), m_tileDataFile);
 	m_tileDataFile = nullptr;
 	bx::debugPrintf("Done!\n");
 

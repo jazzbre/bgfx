@@ -361,6 +361,7 @@ void enkiRunPinnedTasks(enkiTaskScheduler* pETS_)
 
 int enkiIsPinnedTaskComplete(enkiTaskScheduler* pETS_, enkiPinnedTask* pTask_)
 {
+	pETS_;
     ENKI_ASSERT( pTask_ );
     return ( pTask_->GetIsComplete() ) ? 1 : 0;
 }

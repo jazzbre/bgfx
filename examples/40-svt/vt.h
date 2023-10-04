@@ -348,7 +348,7 @@ private:
 class VirtualTexture
 {
 public:
-	VirtualTexture(TileDataFile* _tileDataFile, VirtualTextureInfo* _info, int64_t _atlassize, int64_t _uploadsperframe, int64_t _mipBias = 4);
+	VirtualTexture(TileDataFile* _tileDataFile, VirtualTextureInfo* _info, int64_t _atlassize, int _uploadsperframe, int64_t _mipBias = 4);
 	~VirtualTexture();
 
 	int64_t  getMipBias() const;

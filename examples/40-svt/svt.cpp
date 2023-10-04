@@ -113,10 +113,10 @@ public:
 
 			const auto vertexCount = (tesselation + 1) * (tesselation + 1);
 			const auto vertexSize = vertexCount * sizeof(PosTexcoordVertex);
-			PosTexcoordVertex* vertices = (PosTexcoordVertex*)BX_ALLOC(&m_vtAllocator, vertexSize);
+			PosTexcoordVertex* vertices = (PosTexcoordVertex*)bx::alloc(&m_vtAllocator, vertexSize);
 			const auto indexCount = (tesselation * tesselation) * 6;
 			const auto indexSize = indexCount * sizeof(uint32_t); 
-			uint32_t* indices = (uint32_t*)BX_ALLOC(&m_vtAllocator, indexSize);
+			uint32_t* indices = (uint32_t*)bx::alloc(&m_vtAllocator, indexSize);
 
 			auto indexIndex = 0;
 			auto vertexIndex = 0;
@@ -133,7 +133,7 @@ public:
 					currentVertex->m_x = xPosition;
 					currentVertex->m_y = 0.0f;
 					currentVertex->m_z = yPosition;
-					currentVertex->m_u = 1.0 - u;
+					currentVertex->m_u = 1.0f - u;
 					currentVertex->m_v = v;
 
 					if(x<tesselation && y<tesselation)
@@ -221,15 +221,15 @@ public:
 			}
 
 			const auto size = bx::getSize(&fileReader);
-			auto data = (int16_t*)BX_ALLOC(&m_vtAllocator, size);
-			bx::read(&fileReader, data, size, &err);
+			auto data = (int16_t*)bx::alloc(&m_vtAllocator, size);
+			bx::read(&fileReader, data, (int32_t)size, &err);
 			bx::close(&fileReader);
 
 
 			const int sourceSize = 32 * 1024;
 			const int targetSize = 16 * 1024;
 			const int targetData16 = targetSize * targetSize * sizeof(float);
-			auto data16 = (float*)BX_ALLOC(&m_vtAllocator, targetData16);
+			auto data16 = (float*)bx::alloc(&m_vtAllocator, targetData16);
 
 			for(int y=0;y<sourceSize;y+=2)
 			{
@@ -347,7 +347,7 @@ public:
 				{
 					m_vt->enableColorMipLevels(colorMipLevels);
 				}
-				auto uploadsperframe = m_vt->getUploadsPerFrame();
+				int uploadsperframe = (int)m_vt->getUploadsPerFrame();
 				if (ImGui::InputInt("Updates per frame", &uploadsperframe, 1, 2))
 				{
 					uploadsperframe = bx::clamp(uploadsperframe, 1, 100);
