@@ -338,19 +338,20 @@ Rect Quadtree::getRectangle(int64_t index) {
 
 #if !defined(USEPAGETABLECS)
 void Quadtree::write(Quadtree* node, SimpleImage& image, int64_t miplevel) {
-    if (node->m_level >= miplevel) {
-        int64_t rx = node->m_rectangle.m_x >> miplevel;
-        int64_t ry = node->m_rectangle.m_y >> miplevel;
-        int64_t rw = node->m_rectangle.m_width >> miplevel;
-        int64_t rh = node->m_rectangle.m_width >> miplevel;
+    if (node->m_level < miplevel) {
+        return;
+    }
+    int64_t rx = node->m_rectangle.m_x >> miplevel;
+    int64_t ry = node->m_rectangle.m_y >> miplevel;
+    int64_t rw = node->m_rectangle.m_width >> miplevel;
+    int64_t rh = node->m_rectangle.m_width >> miplevel;
 
-        image.fill({rx, ry, rw, rh}, (uint8_t)node->m_mapping.m_x, (uint8_t)node->m_mapping.m_y, (uint8_t)node->m_level, 255);
+    image.fill({rx, ry, rw, rh}, (uint8_t)node->m_mapping.m_x, (uint8_t)node->m_mapping.m_y, (uint8_t)node->m_level, 255);
 
-        for (int64_t i = 0; i < 4; ++i) {
-            auto child = node->m_children[i];
-            if (child != nullptr) {
-                Quadtree::write(child, image, miplevel);
-            }
+    for (int64_t i = 0; i < 4; ++i) {
+        auto child = node->m_children[i];
+        if (child != nullptr) {
+            Quadtree::write(child, image, miplevel);
         }
     }
 }
@@ -394,7 +395,8 @@ PageTable::PageTable(PageCache* _cache, VirtualTextureInfo* _info, PageIndexer* 
     , m_quadtree(nullptr)
     , m_quadtreeDirty(true) // Force quadtree dirty on startup
 {
-    auto size = m_info->GetPageTableSize();
+    const auto size = m_info->GetPageTableSize();
+    const auto PageTableSizeLog2 = m_indexer->getMipCount();
     m_quadtree = BX_NEW(VirtualTexture::getAllocator(), Quadtree)({0, 0, size, size}, (int64_t)bx::log2((float)size), this);
 #if defined(USEPAGETABLECS)
     m_texture = bgfx::createTexture2D((uint16_t)size, (uint16_t)size, true, 1, bgfx::TextureFormat::RGBA8, BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_POINT | BGFX_TEXTURE_COMPUTE_WRITE);
@@ -413,10 +415,8 @@ PageTable::PageTable(PageCache* _cache, VirtualTextureInfo* _info, PageIndexer* 
         BX_UNUSED(pt);
     };
 #if !defined(USEPAGETABLECS)
-    auto PageTableSizeLog2 = m_indexer->getMipCount();
-
     for (int64_t i = 0; i < PageTableSizeLog2; ++i) {
-        int64_t mipSize = m_info->GetPageTableSize() >> i;
+        const int64_t mipSize = m_info->GetPageTableSize() >> i;
         auto stagingTexture = bgfx::createTexture2D((uint16_t)mipSize, (uint16_t)mipSize, false, 1, bgfx::TextureFormat::BGRA8, BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_POINT);
         m_stagingTextures.push_back(stagingTexture);
         auto simpleImage = BX_NEW(VirtualTexture::getAllocator(), SimpleImage)(mipSize, mipSize, s_channelCount);
@@ -483,12 +483,21 @@ void PageTable::writeQueueTexture(bgfx::ViewId viewId, const PageTableQueue& que
     const int64_t ry = queue.m_rectangle.m_y >> miplevel;
     const int64_t rw = queue.m_rectangle.m_width >> miplevel;
     const int64_t rh = queue.m_rectangle.m_height >> miplevel;
+    if (rw <= 0 || rh <= 0) {
+        return;
+    }
     const float offset[4] = {(float)rx, (float)ry, 0, 0};
     const float value[4] = {queue.m_mapping.m_x * s_oo255, (float)queue.m_mapping.m_y * s_oo255, (float)queue.m_level * s_oo255, 1.0f};
     bgfx::setUniform(m_shaders->m_pageTableUpdateCS.offsetUniform, offset);
     bgfx::setUniform(m_shaders->m_pageTableUpdateCS.valueUniform, value);
     bgfx::setImage(0, texture, (uint8_t)miplevel, bgfx::Access::Write);
-    bgfx::dispatch(viewId, m_shaders->m_pageTableUpdateCS.programHandle, (uint32_t)rw, (uint32_t)rh, 1);
+    int shift = 4;
+    for (; shift >= 0; --shift) {
+        if (rw >> shift > 0) {
+            break;
+        }
+    }
+    bgfx::dispatch(viewId, m_shaders->m_pageTableUpdateCS.programHandles[shift], (uint32_t)rw >> shift, (uint32_t)rh >> shift, 1);
 }
 #endif
 

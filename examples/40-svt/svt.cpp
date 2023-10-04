@@ -64,7 +64,7 @@ public:
         m_width = _width;
         m_height = _height;
         m_debug = BGFX_DEBUG_TEXT;
-        m_reset = 0; // BGFX_RESET_VSYNC;
+        m_reset = BGFX_RESET_VSYNC;
 
         bgfx::Init init;
         init.debug = true;
@@ -225,7 +225,11 @@ public:
 
         m_shaders = new vt::VirtualTextureShaders();
 #if defined(USEPAGETABLECS)
-        m_shaders->m_pageTableUpdateCS.programHandle = bgfx::createProgram(loadShader("cs_vt_pagetableupdate"), true);
+        m_shaders->m_pageTableUpdateCS.programHandles[0] = bgfx::createProgram(loadShader("cs_vt_pagetableupdate1"), true);
+        m_shaders->m_pageTableUpdateCS.programHandles[1] = bgfx::createProgram(loadShader("cs_vt_pagetableupdate2"), true);
+        m_shaders->m_pageTableUpdateCS.programHandles[2] = bgfx::createProgram(loadShader("cs_vt_pagetableupdate4"), true);
+        m_shaders->m_pageTableUpdateCS.programHandles[3] = bgfx::createProgram(loadShader("cs_vt_pagetableupdate8"), true);
+        m_shaders->m_pageTableUpdateCS.programHandles[4] = bgfx::createProgram(loadShader("cs_vt_pagetableupdate16"), true);
         m_shaders->m_pageTableUpdateCS.valueUniform = bgfx::createUniform("u_value", bgfx::UniformType::Vec4);
         m_shaders->m_pageTableUpdateCS.offsetUniform = bgfx::createUniform("u_offset", bgfx::UniformType::Vec4);
 #endif

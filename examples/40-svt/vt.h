@@ -99,7 +99,7 @@ struct PageCount {
 struct VirtualTextureShaders {
 #if defined(USEPAGETABLECS)
     struct {
-        bgfx::ProgramHandle programHandle;
+        bgfx::ProgramHandle programHandles[5];
         bgfx::UniformHandle valueUniform;
         bgfx::UniformHandle offsetUniform;
     } m_pageTableUpdateCS;
